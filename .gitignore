@@ -1,2 +1,5 @@
 .vscode/*
 !.vscode/mcp.json
+
+# Bluebox production baselines — internal operational data, keep local (public repo)
+.bluebox/

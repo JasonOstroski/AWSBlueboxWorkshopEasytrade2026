@@ -182,3 +182,64 @@ curl -X 'DELETE' \
 'http://{IP_ADDRESS}/credit-card-order-service/v1/orders/17' \
 -H 'accept: application/json'
 ```
+
+---
+
+#### `POST` **/v1/orders/bitcoin** `(Start a bitcoin payment — asynchronous)`
+
+Gated behind the `bitcoin_payments_enabled` feature flag. When the flag is off the
+endpoint returns `404`. When on, the payment is recorded as `pending` and confirmation
+happens **asynchronously** on a dedicated thread pool (with a bounded timeout), so the
+request never blocks on the slow/unreliable on-chain confirmation. Returns `202 Accepted`
+with a `paymentId` to poll.
+
+##### Parameters
+
+| name         | type     | data type | description                                     |
+| ------------ | -------- | --------- | ----------------------------------------------- |
+| `accountId`  | required | int       | Account initiating the payment                  |
+| `amount`     | required | number    | Fiat amount to pay in bitcoin (must be > 0)     |
+| `currency`   | required | string    | ISO fiat currency code (e.g. `USD`)             |
+| `btcAddress` | required | string    | Destination bitcoin address                     |
+
+##### Example cURL
+
+```bash
+curl -X 'POST' \
+'http://{IP_ADDRESS}/credit-card-order-service/v1/orders/bitcoin' \
+-H 'accept: application/json' \
+-H 'Content-Type: application/json' \
+-d '{
+    "accountId": 15,
+    "amount": 100.00,
+    "currency": "USD",
+    "btcAddress": "bc1qexampleaddress"
+}'
+```
+
+---
+
+#### `GET` **/v1/orders/bitcoin/{paymentId}/status** `(Poll a bitcoin payment status)`
+
+Returns the current lifecycle state: `pending`, `confirmed`, `failed`, or `expired`.
+
+##### Parameters
+
+| name        | type     | data type     | description                  |
+| ----------- | -------- | ------------- | ---------------------------- |
+| `paymentId` | required | string - GUID | The ID returned by `POST`    |
+
+##### Example cURL
+
+```bash
+curl -X 'GET' \
+'http://{IP_ADDRESS}/credit-card-order-service/v1/orders/bitcoin/{paymentId}/status' \
+-H 'accept: application/json'
+```
+
+##### Configuration (env vars)
+
+| name                        | default | description                                     |
+| --------------------------- | ------- | ----------------------------------------------- |
+| `BITCOIN_CONFIRM_POOL_SIZE` | `8`     | Size of the async confirmation thread pool      |
+| `BITCOIN_CONFIRM_TIMEOUT_MS`| `5000`  | Hard timeout for a single confirmation attempt  |
