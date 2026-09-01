@@ -322,11 +322,18 @@ public class OrderController {
 
     private int CountArythmeticSequenceTotal(int firstElement, int step, int count)
     {
-        // this has a wrong value (normally would be 2), because we want to create an exception!
-        int theGreatDivider = 0;
+        // The divisor for the arithmetic-sequence total. Previously hardcoded to 0,
+        // which threw an ArithmeticException ("/ by zero") and surfaced as an HTTP 500
+        // on GET /v1/orders/{accountId}/status/latest whenever the credit_card_meltdown
+        // feature flag was enabled.
+        int theGreatDivider = 2;
+
+        // Defensive guard: never divide by zero, regardless of the divisor value.
+        if (theGreatDivider == 0) {
+            return 0;
+        }
 
         int lastElement = firstElement + (step * (count - 1));
-        // deepcode ignore DivisionByZero: exception should be thrown here
         int total = (firstElement + lastElement) * count / theGreatDivider;
 
         return total;

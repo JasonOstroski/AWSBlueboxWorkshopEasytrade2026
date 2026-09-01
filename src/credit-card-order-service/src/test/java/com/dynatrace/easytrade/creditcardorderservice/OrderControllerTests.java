@@ -2,6 +2,7 @@ package com.dynatrace.easytrade.creditcardorderservice;
 
 import com.dynatrace.easytrade.creditcardorderservice.models.*;
 
+import dev.openfeature.sdk.Client;
 import dev.openfeature.sdk.OpenFeatureAPI;
 import lombok.SneakyThrows;
 import org.junit.jupiter.api.Test;
@@ -24,6 +25,8 @@ public class OrderControllerTests {
     DatabaseHelper helper;
     @Mock
     OpenFeatureAPI openFeatureAPI;
+    @Mock
+    Client featureFlagClient;
 
     private final String GUID = "a67a075f-f1b3-4fd4-bfbd-e4986cd11956";
     private final StatusRequest STATUS_REQUEST = new StatusRequest(GUID, StatusType.CARD_ORDERED.getType(),
@@ -112,6 +115,31 @@ public class OrderControllerTests {
                 String.format(OrderController.WRONG_SEQUENCE, StatusType.SEQUENCE_ERROR.getDescription(),
                         status.status(), STATUS_REQUEST.type()),
                 STATUS_REQUEST, GUID);
+    }
+
+    @Test
+    @SneakyThrows
+    public void getLatestStatusDoesNotErrorWhenMeltdownFlagEnabledTest() {
+        // Regression test for issue #1: when the credit_card_meltdown flag is on,
+        // GET /v1/orders/{accountId}/status/latest previously threw
+        // ArithmeticException ("/ by zero") and returned HTTP 500. It must now
+        // return a normal response driven by the DB state.
+        Integer accountId = 13;
+        CreditCardOrderStatus status = new CreditCardOrderStatus(123, GUID, OffsetDateTime.now(),
+                StatusType.ORDER_CREATED.getType(), "");
+
+        Mockito.when(openFeatureAPI.getClient()).thenReturn(featureFlagClient);
+        Mockito.when(featureFlagClient.getBooleanValue(eq("credit_card_meltdown"), eq(false)))
+                .thenReturn(true);
+        Mockito.when(helper.getConnection()).thenReturn(null);
+        Mockito.when(helper.getLastOrderStatusForAccountId(null, accountId))
+                .thenReturn(java.util.Optional.of(status));
+
+        OrderController controller = new OrderController(helper, openFeatureAPI);
+        ResponseEntity<StandardResponse> response = controller.getLatestStatus(accountId);
+        var body = response.getBody();
+        assertNotNull(body, "Expected response body to not be null");
+        assertEquals(HttpStatus.OK.value(), body.statusCode());
     }
 
     private void checkOrderCreationResult(int statusCode, String message, CreditCardOrderRequest request) {
