@@ -54,8 +54,31 @@ public static class BrokerServiceDependencyExtension
     private static IServiceCollection AddPackageDependency(this IServiceCollection services) =>
         services.AddTransient<IPackageRepository, PackageRepository>();
 
-    private static IServiceCollection AddPriceDependency(this IServiceCollection services) =>
+    private static IServiceCollection AddPriceDependency(this IServiceCollection services)
+    {
         services.AddTransient<IPriceServiceConnector, PriceServiceConnector>();
+
+        // Named HTTP client for pricing-service with a bounded timeout. Without
+        // this, HttpClient defaults to a 100s timeout, so a slow pricing-service
+        // lets requests queue until threads/connections are exhausted — exactly
+        // the ~11.8s broker p95 blow-up Bluebox observed. The circuit breaker in
+        // PriceServiceConnector then trips on the resulting failures.
+        services.AddHttpClient(PriceServiceConnector.PriceHttpClientName, (provider, client) =>
+        {
+            var configuration = provider.GetRequiredService<IConfiguration>();
+            var timeoutMs = configuration.GetValue(
+                Constants.PriceServiceTimeoutMs,
+                Constants.PriceServiceTimeoutMsDefault
+            );
+            if (timeoutMs <= 0)
+            {
+                timeoutMs = Constants.PriceServiceTimeoutMsDefault;
+            }
+            client.Timeout = TimeSpan.FromMilliseconds(timeoutMs);
+        });
+
+        return services;
+    }
 
     private static IServiceCollection AddProductDependency(this IServiceCollection services) =>
         services.AddTransient<IProductRepository, ProductRepository>();

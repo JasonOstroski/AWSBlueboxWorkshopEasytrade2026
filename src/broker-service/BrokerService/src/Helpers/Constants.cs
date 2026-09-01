@@ -13,6 +13,11 @@
         public const string HighCpuUsageRequestDelayMs = "HIGH_CPU_USAGE_REQUEST_DELAY_MS";
         public const string HighCpuUsageConcurrency = "HIGH_CPU_USAGE_CONCURRENCY";
         public const string FeatureFlagCacheDurationS = "FEATURE_FLAG_CACHE_DURATION_S";
+        // Bounded per-attempt timeout (ms) for the synchronous pricing-service call.
+        // Overridable via env; defaults to 2s so a slow downstream can't queue up
+        // requests behind the default 100s HttpClient timeout under load.
+        public const string PriceServiceTimeoutMs = "PRICE_SERVICE_TIMEOUT_MS";
+        public const int PriceServiceTimeoutMsDefault = 2000;
         public const int OwnerId = 1;
         public const int InvalidTradeId = -1;
         public const string DbNotResponding = "db_not_responding";

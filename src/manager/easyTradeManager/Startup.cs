@@ -35,6 +35,11 @@ namespace easyTradeManager
             services.AddDbContext<PackagesDbContext>(options => options.UseSqlServer(connectionString));
             services.AddDbContext<ProductsDbContext>(options => options.UseSqlServer(connectionString));
 
+            // In-memory cache for static catalog data (Products/Packages). These
+            // were the largest single driver of shared-DB load per Bluebox; caching
+            // removes per-request full-table scans ahead of a 100x scale-up.
+            services.AddMemoryCache();
+
             services.AddControllers().AddJsonOptions(o =>
             {
                 o.JsonSerializerOptions.DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull;

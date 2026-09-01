@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using easyTradeManager.Models;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 
 namespace easyTradeManager.Controllers
@@ -14,12 +15,22 @@ namespace easyTradeManager.Controllers
     [ApiController]
     public class ProductsController : ControllerBase
     {
+        // Products are static reference/catalog data. Bluebox showed manager
+        // driving ~64% of all shared-DB load, dominated by an unfiltered
+        // full-table SELECT on [Products] run on nearly every request. Caching
+        // the catalog collapses that per-request scan to one query per TTL,
+        // which is the single largest DB-load reduction for a 100x scale-up.
+        private const string ProductsCacheKey = "manager:products:all";
+        private static readonly TimeSpan CatalogCacheTtl = TimeSpan.FromSeconds(60);
+
         private readonly ProductsDbContext _context;
+        private readonly IMemoryCache _cache;
         private readonly ILogger _logger;
 
-        public ProductsController(ProductsDbContext context, ILogger<ProductsController> logger)
+        public ProductsController(ProductsDbContext context, IMemoryCache cache, ILogger<ProductsController> logger)
         {
             _context = context;
+            _cache = cache;
             _logger = logger;
         }
 
@@ -44,7 +55,18 @@ namespace easyTradeManager.Controllers
         public async Task<ActionResult<IEnumerable<Product>>> GetProducts()
         {
             _logger.LogInformation("Getting all products");
-            return await _context.Products.ToListAsync();
+
+            if (_cache.TryGetValue(ProductsCacheKey, out List<Product> cached))
+            {
+                return cached;
+            }
+
+            var products = await _context.Products.AsNoTracking().ToListAsync();
+            _cache.Set(ProductsCacheKey, products, new MemoryCacheEntryOptions
+            {
+                AbsoluteExpirationRelativeToNow = CatalogCacheTtl
+            });
+            return products;
         }
     }
 }

@@ -18,6 +18,9 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.dynatrace.easytrade.creditcardorderservice.models.BitcoinPayment;
+import com.dynatrace.easytrade.creditcardorderservice.models.BitcoinPaymentRequest;
+import com.dynatrace.easytrade.creditcardorderservice.models.BitcoinPaymentResponse;
 import com.dynatrace.easytrade.creditcardorderservice.models.CreditCardOrderRequest;
 import com.dynatrace.easytrade.creditcardorderservice.models.CreditCardOrderResponse;
 import com.dynatrace.easytrade.creditcardorderservice.models.CreditCardOrderStatus;
@@ -61,12 +64,20 @@ public class OrderController {
     public static final String WRONG_SEQUENCE = "%s Tried to update from %s to %s!";
     public static final String ORDER_CREATED = "Credit card order has been created.";
     public static final String ORDER_ALREADY_EXISTS = "A credit card order for given accountId already exists!";
+    public static final String BITCOIN_PAYMENTS_FLAG = "bitcoin_payments_enabled";
+    public static final String BITCOIN_PAYMENTS_DISABLED = "Bitcoin payments are not currently enabled.";
+    public static final String BITCOIN_PAYMENT_ACCEPTED = "Bitcoin payment accepted and is awaiting confirmation.";
+    public static final String BITCOIN_PAYMENT_NOT_FOUND = "No bitcoin payment exists for the given payment id.";
+    public static final String BITCOIN_PAYMENT_INVALID = "Bitcoin payment request is invalid.";
     private final DatabaseHelper dbHelper;
     private final OpenFeatureAPI openFeatureAPI;
+    private final BitcoinPaymentService bitcoinPaymentService;
 
-    public OrderController(DatabaseHelper dbHelper, OpenFeatureAPI openFeatureAPI) {
+    public OrderController(DatabaseHelper dbHelper, OpenFeatureAPI openFeatureAPI,
+            BitcoinPaymentService bitcoinPaymentService) {
         this.dbHelper = dbHelper;
         this.openFeatureAPI = openFeatureAPI;
+        this.bitcoinPaymentService = bitcoinPaymentService;
     }
 
     @PostMapping(value="", consumes={"application/json", "application/xml"})
@@ -166,6 +177,43 @@ public class OrderController {
     @Operation(summary = "Update the credit card order status")
     public ResponseEntity<StandardResponse> updateStatus(@PathVariable String id, @RequestBody StatusRequest request) {
         return handleNewStatus(id, request);
+    }
+
+    @PostMapping(value="/bitcoin", consumes={"application/json", "application/xml"})
+    @Operation(summary = "Start a bitcoin payment (asynchronous). Returns 202 with a payment id to poll.")
+    public ResponseEntity<StandardResponse> createBitcoinPayment(@RequestBody BitcoinPaymentRequest request) {
+        if (!bitcoinPaymentsEnabled()) {
+            return buildResponseEntity(HttpStatus.NOT_FOUND, BITCOIN_PAYMENTS_DISABLED, null, null, null);
+        }
+
+        BitcoinPayment payment;
+        try {
+            payment = bitcoinPaymentService.createPayment(request);
+        } catch (IllegalArgumentException | NullPointerException e) {
+            logger.info("Rejected invalid bitcoin payment request: {}", e.getMessage());
+            return buildResponseEntity(HttpStatus.BAD_REQUEST, BITCOIN_PAYMENT_INVALID, null, request, e.getMessage());
+        }
+
+        // 202 Accepted: work continues asynchronously; the request never blocks on the processor.
+        return buildResponseEntity(HttpStatus.ACCEPTED, BITCOIN_PAYMENT_ACCEPTED,
+                new BitcoinPaymentResponse(payment.paymentId(), payment.status().getType()), null, null);
+    }
+
+    @GetMapping("/bitcoin/{paymentId}/status")
+    @Operation(summary = "Get the current status of a bitcoin payment")
+    public ResponseEntity<StandardResponse> getBitcoinPaymentStatus(@PathVariable String paymentId) {
+        if (!bitcoinPaymentsEnabled()) {
+            return buildResponseEntity(HttpStatus.NOT_FOUND, BITCOIN_PAYMENTS_DISABLED, null, null, null);
+        }
+
+        return bitcoinPaymentService.getPayment(paymentId)
+                .map(p -> buildResponseEntity(HttpStatus.OK, "Bitcoin payment status found.",
+                        new BitcoinPaymentResponse(p.paymentId(), p.status().getType())))
+                .orElse(buildResponseEntity(HttpStatus.NOT_FOUND, BITCOIN_PAYMENT_NOT_FOUND));
+    }
+
+    private boolean bitcoinPaymentsEnabled() {
+        return openFeatureAPI.getClient().getBooleanValue(BITCOIN_PAYMENTS_FLAG, false);
     }
 
     /**
@@ -322,11 +370,12 @@ public class OrderController {
 
     private int CountArythmeticSequenceTotal(int firstElement, int step, int count)
     {
-        // this has a wrong value (normally would be 2), because we want to create an exception!
-        int theGreatDivider = 0;
+        // Sum of an arithmetic sequence: n * (firstElement + lastElement) / 2.
+        // The divisor is fixed at 2 (never 0) so this can no longer throw an
+        // ArithmeticException on the payment/order-status path.
+        final int theGreatDivider = 2;
 
         int lastElement = firstElement + (step * (count - 1));
-        // deepcode ignore DivisionByZero: exception should be thrown here
         int total = (firstElement + lastElement) * count / theGreatDivider;
 
         return total;
