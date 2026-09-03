@@ -322,11 +322,21 @@ public class OrderController {
 
     private int CountArythmeticSequenceTotal(int firstElement, int step, int count)
     {
-        // this has a wrong value (normally would be 2), because we want to create an exception!
-        int theGreatDivider = 0;
+        // The sum of an arithmetic sequence is (firstElement + lastElement) * count / 2.
+        int theGreatDivider = 2;
 
         int lastElement = firstElement + (step * (count - 1));
-        // deepcode ignore DivisionByZero: exception should be thrown here
+
+        // Guard against a divide-by-zero: if the divisor is ever zero (e.g. injected
+        // via the credit_card_meltdown feature flag or a bad data state), degrade
+        // gracefully by returning 0 instead of throwing an unhandled
+        // ArithmeticException that would fail the whole status endpoint.
+        if (theGreatDivider == 0) {
+            logger.warn("CountArythmeticSequenceTotal received a zero divisor; "
+                    + "returning 0 instead of throwing ArithmeticException.");
+            return 0;
+        }
+
         int total = (firstElement + lastElement) * count / theGreatDivider;
 
         return total;
